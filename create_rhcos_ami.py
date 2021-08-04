@@ -294,7 +294,7 @@ class OpenShiftRelease(Base):
 
 @click.command()
 @click.option('--s3-bucket', required=True, help='Name of S3 bucket to upload disk images')
-@click.option('--public/--no-public', default=False)
+@click.option('--public/--no-public', default=False, help='Set permissions on AMIs as public or private')
 @click.argument('ocp_versions', nargs=-1)
 def cli(s3_bucket, public, ocp_versions):
     """Create RHCOS AMIs for the given OCP_VERSIONS.
