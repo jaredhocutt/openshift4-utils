@@ -19,6 +19,7 @@ import requests
 #
 # Determine region of bucket to use for API calls to create AMI
 # Take parameter for copying AMI to other regions
+# Pass parameters into each function for RHCOS release instead of relying on class variables
 #
 ###############################################################################
 
@@ -58,7 +59,7 @@ class Base():
 
 
 class RHCOSRelease(Base):
-    def __init__(self, version, s3_bucket) -> None:
+    def __init__(self, version) -> None:
         super().__init__()
 
         self.version = version
@@ -71,8 +72,6 @@ class RHCOSRelease(Base):
         self.download_url = f'{self._base_url}/{self.version_y}/{self.version}/{self.filename_gzip}'
         self.download_path = os.path.join(tempfile.gettempdir(), self.filename_gzip)
         self.unpack_path = os.path.join(tempfile.gettempdir(), self.filename)
-
-        self.s3_bucket = s3_bucket
 
     def __repr__(self) -> str:
         return f'RHCOSRelease({self.version})'
@@ -96,7 +95,8 @@ class RHCOSRelease(Base):
             logger.info(f'Skipping unpack, {self.unpack_path} already exists')
             return
 
-        self.download()
+        if not os.path.exists(self.download_path):
+            self.download()
 
         logger.info(f'Unpacking {self.download_path}')
 
@@ -104,19 +104,20 @@ class RHCOSRelease(Base):
             with open(self.unpack_path, 'wb') as f_out:
                 shutil.copyfileobj(f_in, f_out)
 
-    def upload(self) -> None:
+    def upload(self, s3_bucket) -> None:
         """Upload the unpacked RHCOS image to S3."""
         s3 = boto3.client('s3')
 
-        if s3.list_objects_v2(Bucket=self.s3_bucket, Prefix=self.filename).get('KeyCount', 0) > 0:
-            logger.info(f'Skipping upload, s3://{self.s3_bucket}/{self.filename} already exists')
+        if s3.list_objects_v2(Bucket=s3_bucket, Prefix=self.filename).get('KeyCount', 0) > 0:
+            logger.info(f'Skipping upload, s3://{s3_bucket}/{self.filename} already exists')
             return
 
-        self.unpack()
+        if not os.path.exists(self.unpack_path):
+            self.unpack()
 
         with open(self.unpack_path, 'rb') as f:
-            logger.info(f'Uploading {self.unpack_path} to s3://{self.s3_bucket}/{self.filename}')
-            s3.upload_fileobj(f, self.s3_bucket, self.filename)
+            logger.info(f'Uploading {self.unpack_path} to s3://{s3_bucket}/{self.filename}')
+            s3.upload_fileobj(f, s3_bucket, self.filename)
 
     def existing_snapshot(self) -> str:
         """Checks for existing snapshot and returns the snapshot ID if it exists."""
@@ -134,16 +135,18 @@ class RHCOSRelease(Base):
         if len(existing_snapshots['Snapshots']) > 0:
             return existing_snapshots['Snapshots'][0]['SnapshotId']
 
-    def import_snapshot(self) -> str:
+    def import_snapshot(self, s3_bucket) -> str:
         """Imports a snapshot from the RHCOS image in S3."""
         snapshot_id = self.existing_snapshot()
         if snapshot_id:
             logger.info(f'Skipping snapshot import, {snapshot_id} already exists')
             return snapshot_id
 
-        self.upload()
+        s3 = boto3.client('s3')
+        if not s3.list_objects_v2(Bucket=s3_bucket, Prefix=self.filename).get('KeyCount', 0) > 0:
+            self.upload(s3_bucket)
 
-        logger.info(f'Importing snapshot from s3://{self.s3_bucket}/{self.filename}')
+        logger.info(f'Importing snapshot from s3://{s3_bucket}/{self.filename}')
 
         ec2 = boto3.client('ec2')
         description = 'rhcos-{}'.format(self.version)
@@ -153,7 +156,7 @@ class RHCOSRelease(Base):
                 'Description': description,
                 'Format': 'vmdk',
                 'UserBucket': {
-                    'S3Bucket': self.s3_bucket,
+                    'S3Bucket': s3_bucket,
                     'S3Key': self.filename,
                 },
             },
@@ -214,7 +217,7 @@ class RHCOSRelease(Base):
             logger.info(f'Skipping register image, {image_id} already exists')
             return image_id
 
-        snapshot_id = self.import_snapshot()
+        snapshot_id = self.existing_snapshot()
 
         logger.info(f'Registering image from {snapshot_id}')
 
@@ -260,12 +263,23 @@ class RHCOSRelease(Base):
 
         return image_id
 
+    def create_ami(self, s3_bucket, public) -> str:
+        image_id = self.existing_image()
+        if image_id:
+            logger.info(f'RHCOS {self.version} AMI {image_id} already exists')
+            return image_id
+
+        self.download()
+        self.unpack()
+        self.upload(s3_bucket)
+        self.import_snapshot(s3_bucket)
+        self.register_image(public)
+
 class OpenShiftRelease(Base):
-    def __init__(self, version, s3_bucket) -> None:
+    def __init__(self, version) -> None:
         super().__init__()
 
         self.version = version
-        self.s3_bucket = s3_bucket
 
     def __repr__(self) -> str:
         return f'OpenShiftRelease({self.version})'
@@ -285,7 +299,7 @@ class OpenShiftRelease(Base):
                 if len(row.contents) > 2:
                     m = re.search(r'(\d\.\d\.\d)/', row.contents[1].text)
                     if m:
-                        self._rhcos_releases.append(RHCOSRelease(m.group(1), self.s3_bucket))
+                        self._rhcos_releases.append(RHCOSRelease(m.group(1)))
 
             logger.info(f'Found RHCOS releases {", ".join([i.version for i in self._rhcos_releases])}')
 
@@ -296,17 +310,17 @@ class OpenShiftRelease(Base):
 @click.option('--s3-bucket', required=True, help='Name of S3 bucket to upload disk images')
 @click.option('--public/--no-public', default=False, help='Set permissions on AMIs as public or private')
 @click.argument('ocp_versions', nargs=-1)
-def cli(s3_bucket, public, ocp_versions):
+def create(s3_bucket, public, ocp_versions):
     """Create RHCOS AMIs for the given OCP_VERSIONS.
 
     Finds the RHCOS releses for the given OCP_VERSIONS and creates AMIs for each of them.
     """
     for ocp_version in ocp_versions:
-        ocp_release = OpenShiftRelease(ocp_version, s3_bucket)
+        ocp_release = OpenShiftRelease(ocp_version)
         for rhcos_release in ocp_release.rhcos_releases:
             logger.info(f'Processing RHCOS release {rhcos_release.version}')
-            rhcos_release.register_image()
+            rhcos_release.create_ami(s3_bucket, public)
 
 
 if __name__ == '__main__':
-    cli()
+    create()
