@@ -5,6 +5,13 @@ orbs:
 
 workflows:
   upload_rhcos_ami:
+    triggers:
+      - schedule:
+          cron: 0 9 * * *
+          filters:
+            branches:
+              only:
+                - main
     jobs:
       - upload-rhcos-ami-to-region:
           name: upload-rhcos-ami-to-us-gov-east-1
