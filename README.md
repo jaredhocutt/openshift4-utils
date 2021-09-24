@@ -1,5 +1,7 @@
 # OpenShift 4 Utilities
 
+[![CircleCI](https://circleci.com/gh/jaredhocutt/openshift4-utils.svg?style=shield)](https://circleci.com/gh/jaredhocutt/openshift4-utils)
+
 ```bash
 ./create_rhcos_ami.py --help                                                                                                                                                                  <aws:govcloud>
 Usage: create_rhcos_ami.py [OPTIONS] [OCP_VERSIONS]...
