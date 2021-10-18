@@ -321,10 +321,10 @@ def create(s3_bucket, public, ocp_versions):
         for rhcos_release in ocp_release.rhcos_releases:
             logger.info(f'Processing RHCOS release {rhcos_release.version}')
             image_id = rhcos_release.create_ami(s3_bucket, public)
-            image_ids.append((rhcos_release, image_id,))
+            image_ids.append((rhcos_release.version, image_id,))
 
     for i in image_ids:
-        print(f'- `rhcos-{i[0]} => {i[1]}')
+        print(f'- `rhcos-{i[0]} => {i[1]}`')
 
 
 if __name__ == '__main__':
