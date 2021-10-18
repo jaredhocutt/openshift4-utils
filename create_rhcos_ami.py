@@ -273,7 +273,7 @@ class RHCOSRelease(Base):
         self.unpack()
         self.upload(s3_bucket)
         self.import_snapshot(s3_bucket)
-        self.register_image(public)
+        return self.register_image(public)
 
 class OpenShiftRelease(Base):
     def __init__(self, version) -> None:
@@ -315,11 +315,16 @@ def create(s3_bucket, public, ocp_versions):
 
     Finds the RHCOS releses for the given OCP_VERSIONS and creates AMIs for each of them.
     """
+    image_ids = []
     for ocp_version in ocp_versions:
         ocp_release = OpenShiftRelease(ocp_version)
         for rhcos_release in ocp_release.rhcos_releases:
             logger.info(f'Processing RHCOS release {rhcos_release.version}')
-            rhcos_release.create_ami(s3_bucket, public)
+            image_id = rhcos_release.create_ami(s3_bucket, public)
+            image_ids.append((rhcos_release, image_id,))
+
+    for i in image_ids:
+        print(f'- `rhcos-{i[0]} => {i[1]}')
 
 
 if __name__ == '__main__':
