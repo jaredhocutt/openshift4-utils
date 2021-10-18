@@ -17,12 +17,12 @@ workflows:
           name: upload-rhcos-ami-to-us-gov-east-1
           aws_region: us-gov-east-1
           s3_bucket: rh-openshift-rhcos-govcloud-prod-vmimport-us-gov-east-1
-          openshift_versions: 4.6 4.7 4.8
+          openshift_versions: 4.6 4.7 4.8 4.9
       - upload-rhcos-ami-to-region:
           name: upload-rhcos-ami-to-us-gov-west-1
           aws_region: us-gov-west-1
           s3_bucket: rh-openshift-rhcos-govcloud-prod-vmimport-us-gov-west-1
-          openshift_versions: 4.6 4.7 4.8
+          openshift_versions: 4.6 4.7 4.8 4.9
 
 jobs:
   upload-rhcos-ami-to-region:
